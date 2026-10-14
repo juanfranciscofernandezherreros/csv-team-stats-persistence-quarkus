@@ -11,7 +11,9 @@ import com.example.csvteamstats.domain.model.TeamStats;
 import com.example.csvteamstats.domain.model.TeamStatsRejection;
 import com.example.csvteamstats.domain.validation.TeamStatsFunctionalValidator;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /** Implements the use cases and depends only on application ports and domain types. */
 public class TeamStatsApplicationService implements PersistTeamStatsUseCase, ProcessTeamStatsBatchUseCase {
@@ -62,9 +64,21 @@ public class TeamStatsApplicationService implements PersistTeamStatsUseCase, Pro
                 valid.add(record.stats());
             }
         }
-        persistBatch(valid);
-        successEvents.publishBatch(valid);
+        List<TeamStats> distinct = distinctByNaturalKey(valid);
+        persistBatch(distinct);
+        successEvents.publishBatch(distinct);
         rejected.forEach(rejectedEvents::publish);
-        return new BatchProcessingResult(records.size(), valid.size(), rejected.size());
+        return new BatchProcessingResult(records.size(), distinct.size(), rejected.size());
     }
+
+    /** PostgreSQL cannot upsert the same unique key twice in one rewritten JDBC batch. */
+    private List<TeamStats> distinctByNaturalKey(List<TeamStats> stats) {
+        Map<NaturalKey, TeamStats> distinct = new LinkedHashMap<>();
+        for (TeamStats stat : stats) {
+            distinct.put(new NaturalKey(stat.getMatchId(), stat.getPeriod(), stat.getCategory(), stat.getMetric()), stat);
+        }
+        return new ArrayList<>(distinct.values());
+    }
+
+    private record NaturalKey(String matchId, String period, String category, String metric) {}
 }
